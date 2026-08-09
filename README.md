@@ -226,6 +226,7 @@ The `tb_encrypt_test.sv` header documents a real debugging episode worth highlig
 - **Race 2**: a zero-cycle gap between consecutive stimulus tasks during active backpressure could cause the driver's `@(posedge clk)` wait and the acceptance monitor's sampling to align on the same edge in an order-dependent way.
 
 **Fix applied**: strict **negedge-drive / posedge-sample** discipline across the entire testbench suite — all stimulus (`in_valid`, `out_ready`, data) changes only at `negedge clk`, and all sampling/monitoring only happens at `posedge clk`, after values have been stable for a full half-cycle. This eliminated all 577 spurious failures without touching the DUT. This fix is now standard practice across every testbench in the repository.
+
 # Verification Results
 
 The AES accelerator was verified using a hierarchical bottom-up verification strategy consisting of unit-level, subsystem-level, and top-level self-checking testbenches. All testbenches compare DUT outputs against an independent software reference model derived directly from FIPS-197 rather than RTL-derived expected values.
@@ -247,7 +248,7 @@ The dual-bank key management subsystem was verified independently before integra
 
 ### Key System Waveform
 
-![Key System Verification](docs/images/key_system_waveform.png)
+![Key System Verification](images/key_system_waveform.png)
 
 The waveform above demonstrates:
 
@@ -289,7 +290,7 @@ The 11-stage fully-pipelined AES encryption engine was verified using both direc
 
 ### Encryption Datapath Waveform
 
-![Encryption Pipeline Verification](docs/images/encryption_waveform.png)
+![Encryption Pipeline Verification](images/encryption_waveform.png)
 
 The waveform illustrates:
 
@@ -332,7 +333,7 @@ The inverse cipher datapath was verified independently using the same methodolog
 
 ### Decryption Datapath Waveform
 
-![Decryption Pipeline Verification](docs/images/decryption_waveform.png)
+![Decryption Pipeline Verification](images/decryption_waveform.png)
 
 The waveform demonstrates:
 
@@ -355,44 +356,6 @@ The waveform demonstrates:
 | Long Regression | PASS |
 
 **Summary:** All directed and randomized tests passed.
-
----
-
-## Top-Level System Verification
-
-After individual subsystem validation, the complete accelerator was verified using a layered class-based self-checking testbench.
-
-![Verification Methodology](docs/images/verification_methodology.png)
-
-The verification environment includes:
-
-- Transaction Generator
-- Driver
-- Monitor
-- Scoreboard
-- Golden Reference Model
-- Functional Coverage Collection
-
-Coverage dimensions include:
-
-- Encryption and decryption modes
-- Dual-bank operation
-- In-flight direction switching
-- Continuous streaming traffic
-- Back-to-back transfers
-- Backpressure scenarios
-- Long randomized regressions
-
-### Final Verification Results
-
-| Metric | Value |
-|---------|---------|
-| Transactions Accepted | 6281 |
-| Transactions Checked | 6281 |
-| Pass Count | 6281 |
-| Failure Count | 0 |
-
-✅ All tests passed successfully.
 
 ### Results summary
 
