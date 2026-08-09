@@ -1,45 +1,157 @@
 # Dual-Bank Pipelined AES-128 Hardware Accelerator
 
-An 11-stage, fully-pipelined AES-128 encrypt/decrypt core in synthesizable SystemVerilog, built around a **novel dual-bank key expansion unit** that lets the datapath keep streaming blocks under one key while a second key is expanded in the background — with zero pipeline stall on key rotation.
+## Overview
 
-> Throughput: 1 block accepted per clock cycle (steady state) · Latency: 11 cycles · Key change: hidden behind in-flight traffic instead of draining the pipe.
+This project implements a fully-pipelined AES-128 hardware accelerator in SystemVerilog featuring:
 
----
+- 11-stage AES encryption pipeline
+- 11-stage AES decryption pipeline
+- Dual-bank round-key storage
+- Background key expansion
+- Dynamic key rotation without pipeline drain
+- Streaming valid/ready interface
+- Self-checking verification environment
 
-## Table of contents
+The design sustains one 128-bit block per clock cycle after pipeline fill while supporting concurrent key expansion in the background.
 
-- [Why this project exists](#why-this-project-exists)
-- [Key features](#key-features)
-- [System architecture](#system-architecture)
-  - [Top level — `aes_top`](#top-level--aes_top)
-  - [The dual-bank key expansion unit](#the-dual-bank-key-expansion-unit)
-  - [The 11-stage pipelined cipher datapath](#the-11-stage-pipelined-cipher-datapath)
-  - [Single-active-engine arbitration](#single-active-engine-arbitration)
-- [Module reference](#module-reference)
-- [Handshake / interface contract](#handshake--interface-contract)
-- [Verification methodology](#verification-methodology)
-  - [Philosophy](#philosophy)
-  - [Verification architecture](#verification-architecture)
-  - [Per-module verification plan](#per-module-verification-plan)
-  - [Debugging real races — a worked example](#debugging-real-races--a-worked-example)
-  - [Waveform evidence](#waveform-evidence)
-  - [Results summary](#results-summary)
-- [Repository layout](#repository-layout)
-- [Running the simulations](#running-the-simulations)
-- [Design notes, trade-offs, and known limitations](#design-notes-trade-offs-and-known-limitations)
-- [Future work](#future-work)
+Target platform:
+- Xilinx Zynq-7000 / PYNQ-Z2
+- Vivado XSIM verified
+- Fully synthesizable RTL
 
 ---
 
-## Why this project exists
+## Design Summary
 
-Most open-source AES cores on GitHub fall into one of two buckets: a tiny unpipelined reference implementation, or a fully pipelined core that assumes the key never changes mid-stream (so a key update means draining the entire pipeline first). Neither is representative of how a real accelerator behind a network or storage stack is used — keys rotate (per-session, per-tunnel, per-block-device) while traffic keeps flowing.
+| Parameter | Specification |
+|------------|--------------|
+| Project | Dual-Bank Pipelined AES-128 Hardware Accelerator |
+| RTL Language | SystemVerilog |
+| Cryptographic Standard | FIPS-197 AES-128 |
+| Architecture Style | Fully Pipelined Streaming Datapath |
+| Encryption Pipeline Depth | 11 Stages |
+| Decryption Pipeline Depth | 11 Stages |
+| Key Expansion Engine | Dedicated Background Key Scheduler |
+| Key Storage Architecture | Dual-Bank Round-Key Memory |
+| Round Keys per Bank | 11 (AES-128) |
+| Key Rotation Support | Non-Blocking |
+| Pipeline Stall During Key Updates | None |
+| Throughput | 1 × 128-bit Block / Clock Cycle |
+| Interface Protocol | Valid / Ready Handshake |
+| Concurrent Operations | Encryption, Decryption, Key Expansion |
+| Backpressure Support | Yes |
+| Streaming Support | Continuous Traffic Processing |
+| Verification Methodology | Self-Checking Testbenches |
+| Golden Reference Model | Independent FIPS-197 Software Model |
+| Directed Testing | FIPS-197 Known Answer Tests |
+| Randomized Testing | Supported |
+| Key-System Verification | 49 / 49 Tests Passed |
+| Top-Level Regression Vectors | 6281 |
+| Regression Failures | 0 |
+| Simulation Environment | Vivado XSIM |
+| FPGA Target | Xilinx Zynq-7000 (PYNQ-Z2) |
+| Synthesis Ready | Yes |
+| Verification Status | ✅ Fully Verified |
 
-This project targets that gap directly: a fully pipelined AES-128 core (11 stages, 1 block/cycle throughput) with a **dual-bank round-key store**. One bank actively feeds in-flight pipeline stages while the key-expansion engine derives a fresh set of 11 round keys into the *other* bank in the background. When the new key finishes expanding, it becomes the active bank for new transactions — the in-flight pipeline never stalls and never sees a torn/partial key.
+## Project Highlights
 
-The project also treats verification as a first-class deliverable, not an afterthought: every combinational primitive, the key-expansion FSM, the dual-bank arbiter, and the full encrypt/decrypt pipelines each have independent, self-checking testbenches driven against software reference models built from FIPS-197 directly — not against the RTL itself.
+- 🚀 Fully pipelined AES-128 accelerator sustaining one 128-bit block per cycle
+- 🔄 Dual-bank round-key architecture enabling background key expansion
+- ⚡ Non-blocking key rotation without draining active pipelines
+- 🔐 Independent encryption and decryption datapaths
+- 🧪 Self-checking verification environment using an independent FIPS-197 reference model
+- ✅ 49 / 49 key-system tests passed
+- ✅ 6,281 encryption vectors passed
+- ✅ 6,281 decryption vectors passed
+- 🎯 Zero functional failures across all regression suites
+  
+## Table of Contents
 
-## Key features
+- [Architecture Overview](#architecture-overview)
+- [My Contributions](#my-contributions)
+- [Architectural Motivation](#architectural-motivation)
+- [Key Features](#key-features)
+- [System Architecture](#system-architecture)
+- [Module Reference](#module-reference)
+- [Handshake / Interface Contract](#handshake--interface-contract)
+- [Verification Methodology](#verification-methodology)
+- [Verification Results](#verification-results)
+- [Repository Layout](#repository-layout)
+- [Running the Simulations](#running-the-simulations)
+- [Design Notes, Trade-Offs, and Known Limitations](#design-notes-trade-offs-and-known-limitations)
+- [Future Work](#future-work)
+
+---
+
+## Architecture Overview
+
+The accelerator consists of three primary subsystems:
+
+1. Dual-Bank Key Management System
+2. AES Encryption / Decryption Datapaths
+3. Streaming Control & Transaction Management Layer
+
+Together these subsystems enable continuous AES-128 processing while supporting non-blocking key rotation through background key expansion.
+
+![Top-Level Architecture](images/system_architecture.jpg)
+
+### Dual-Bank Key Management Architecture
+
+The key management subsystem is responsible for key buffering, round-key generation, and dynamic bank allocation.
+
+![Key System Architecture](images/key_system_architecture.jpg)
+
+### AES Cipher Engine Architecture
+
+The cipher engine consists of fully pipelined encryption and decryption datapaths operating on independent transaction streams.
+
+![Cipher Engine Architecture](images/engine_architecture.jpg)
+
+## My Contributions
+
+This project was conceived, architected, implemented, and verified end-to-end as an independent RTL design project.
+
+Key contributions include:
+
+- Dual-bank round-key memory architecture
+- Background AES key expansion engine
+- 11-stage pipelined encryption datapath
+- 11-stage pipelined decryption datapath
+- Key FIFO and arbitration controller
+- Valid/ready streaming interface
+- Self-checking verification infrastructure
+- FIPS-197 software golden reference model
+- Directed and randomized regression environments
+- 
+## Architectural Motivation
+
+Many open-source AES implementations are designed either as educational reference designs prioritizing simplicity, or as high-throughput pipelines that assume encryption keys remain static throughout operation. While these architectures are useful for demonstrating AES functionality, they do not accurately reflect the requirements of real-world hardware accelerators deployed in modern computing systems.
+
+In practical applications such as secure network interfaces, VPN gateways, storage encryption engines, data-center accelerators, and embedded security processors, encryption keys frequently change while data traffic continues to flow. Traditional AES pipelines typically handle key updates by stalling the datapath, flushing in-flight transactions, regenerating round keys, and then restarting operation. Although functionally correct, this approach introduces unnecessary latency and reduces effective throughput.
+
+The objective of this project was to explore an architecture capable of maintaining continuous pipeline operation during key transitions without sacrificing throughput or correctness.
+
+To address this challenge, the design introduces a **dual-bank round-key architecture**. Instead of relying on a single round-key memory, two independent key banks are maintained:
+
+- An **active bank** that supplies round keys to the encryption and decryption datapaths.
+- A **background bank** that receives newly expanded round keys from the key-expansion engine.
+
+While traffic continues to be processed using the active key bank, the key scheduler independently expands a new AES-128 key into the inactive bank. Once expansion completes, newly arriving transactions are automatically assigned to the updated bank while previously accepted transactions continue using their original key context.
+
+This architecture provides several advantages:
+
+- Non-blocking key rotation
+- Continuous streaming operation
+- No pipeline draining during key updates
+- Deterministic transaction behavior
+- Improved accelerator utilization
+- Clear separation between key scheduling and datapath execution
+
+The resulting system more closely resembles the design challenges encountered in production cryptographic accelerators, where key management and data processing must operate concurrently while maintaining strict correctness guarantees.
+
+Beyond the datapath itself, verification was treated as a primary design objective. Every major subsystem—including AES primitives, key expansion, dual-bank key management, encryption, and decryption pipelines—was verified using independent self-checking environments and software reference models derived directly from the FIPS-197 specification. This ensures that architectural optimizations do not compromise functional correctness and that each subsystem can be validated independently before full-system integration.
+
+## Key Features
 
 - **AES-128, FIPS-197 compliant** forward (encrypt) and straightforward inverse (decrypt) cipher, byte-exact against the standard's Appendix B/C test vectors.
 - 
@@ -60,7 +172,7 @@ The project also treats verification as a first-class deliverable, not an aftert
 - **Bottom-up, golden-model verification** at every hierarchy level: unit tests for each transform primitive, a scoreboarded subsystem testbench for the key system, directed regression testbenches (10 test groups, thousands of vectors) for encrypt/decrypt, and a class-based (generator/driver/scoreboard) testbench at the top level.
 - Fully synthesizable SystemVerilog, verified functionally correct on **Vivado XSIM**, targeting a **PYNQ-Z2 / Zynq-7000** class FPGA (see [Future work](#future-work)).
 
-## System architecture
+## System Architecture
 
 ![System architecture diagram](images/system_architecture.jpg)
 
