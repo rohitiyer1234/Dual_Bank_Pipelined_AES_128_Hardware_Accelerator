@@ -248,7 +248,7 @@ The dual-bank key management subsystem was verified independently before integra
 
 ### Key System Waveform
 
-![Key System Verification](images/key_system_waveform.png)
+![Key System Verification](images/key_system_waveform.jpg)
 
 The waveform above demonstrates:
 
