@@ -122,7 +122,7 @@ Key contributions include:
 - Self-checking verification infrastructure
 - FIPS-197 software golden reference model
 - Directed and randomized regression environments
-- 
+  
 ## Architectural Motivation
 
 Many open-source AES implementations are designed either as educational reference designs prioritizing simplicity, or as high-throughput pipelines that assume encryption keys remain static throughout operation. While these architectures are useful for demonstrating AES functionality, they do not accurately reflect the requirements of real-world hardware accelerators deployed in modern computing systems.
@@ -154,21 +154,21 @@ Beyond the datapath itself, verification was treated as a primary design objecti
 ## Key Features
 
 - **AES-128, FIPS-197 compliant** forward (encrypt) and straightforward inverse (decrypt) cipher, byte-exact against the standard's Appendix B/C test vectors.
-- 
+  
 - **11-stage fully pipelined datapath** (`PIPE_DEPTH = NUM_ROUNDS + 1 = 11`): one new block accepted every clock cycle in steady state, fixed 11-cycle latency.
-- 
+  
 - **Dual-bank key expansion unit** — the headline contribution:
   - `keymem_dual`: two independent 11×128-bit round-key banks with per-bank `valid` / `free` / `busy` status.
   - `AES_Key_Expansion_128`: a 1-round-key-per-cycle Rijndael key-schedule engine (RotWord → SubWord → ⊕Rcon → XOR chain), producing a full 11-round schedule in 11 cycles.
   - `key_controller`: arbitrates FIFO-buffered incoming keys onto whichever bank is free, with bank-0-priority selection and safe start-pulse sequencing.
   - `key_fifo`: a 4-deep synchronous FIFO decoupling key arrival from key-expansion latency.
-  - 
+    
   - **Per-stage bank tagging**: every one of the 11 pipeline stages carries a `bank[i]` tag alongside its `valid[i]` bit, so in-flight blocks always read *their own* key bank even while the other bank is being reloaded — no key-in-flight hazard is possible by construction.
-  - 
+    
 - **Single-active-engine arbitration** at the top level: `AES_Encrypt` and `AES_Decrypt` are two independent pipeline instances sharing one data bus. Rather than building a reorder buffer to merge two independent `out_valid` streams, the design enforces a provably-safe policy — a new transaction of one mode is only accepted while the *other* engine's pipeline is fully drained — which guarantees `enc_out_valid` and `dec_out_valid` are mutually exclusive every cycle, so the output mux is a plain OR/mux with a runtime assertion backing the invariant.
-- 
+  
 - **Plain valid/ready streaming interface**, deliberately shaped to drop behind AXI4-Stream (data plane) and AXI4-Lite (control/status plane) shells without restructuring — documented inline in `aes_top.sv`.
-- 
+  
 - **Bottom-up, golden-model verification** at every hierarchy level: unit tests for each transform primitive, a scoreboarded subsystem testbench for the key system, directed regression testbenches (10 test groups, thousands of vectors) for encrypt/decrypt, and a class-based (generator/driver/scoreboard) testbench at the top level.
 - Fully synthesizable SystemVerilog, verified functionally correct on **Vivado XSIM**, targeting a **PYNQ-Z2 / Zynq-7000** class FPGA (see [Future work](#future-work)).
 
