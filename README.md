@@ -4,8 +4,6 @@ An 11-stage, fully-pipelined AES-128 encrypt/decrypt core in synthesizable Syste
 
 > Throughput: 1 block accepted per clock cycle (steady state) · Latency: 11 cycles · Key change: hidden behind in-flight traffic instead of draining the pipe.
 
-![System architecture](docs/images/system_architecture.jpg)
-
 ---
 
 ## Table of contents
@@ -44,21 +42,27 @@ The project also treats verification as a first-class deliverable, not an aftert
 ## Key features
 
 - **AES-128, FIPS-197 compliant** forward (encrypt) and straightforward inverse (decrypt) cipher, byte-exact against the standard's Appendix B/C test vectors.
+- 
 - **11-stage fully pipelined datapath** (`PIPE_DEPTH = NUM_ROUNDS + 1 = 11`): one new block accepted every clock cycle in steady state, fixed 11-cycle latency.
+- 
 - **Dual-bank key expansion unit** — the headline contribution:
   - `keymem_dual`: two independent 11×128-bit round-key banks with per-bank `valid` / `free` / `busy` status.
   - `AES_Key_Expansion_128`: a 1-round-key-per-cycle Rijndael key-schedule engine (RotWord → SubWord → ⊕Rcon → XOR chain), producing a full 11-round schedule in 11 cycles.
   - `key_controller`: arbitrates FIFO-buffered incoming keys onto whichever bank is free, with bank-0-priority selection and safe start-pulse sequencing.
   - `key_fifo`: a 4-deep synchronous FIFO decoupling key arrival from key-expansion latency.
+  - 
   - **Per-stage bank tagging**: every one of the 11 pipeline stages carries a `bank[i]` tag alongside its `valid[i]` bit, so in-flight blocks always read *their own* key bank even while the other bank is being reloaded — no key-in-flight hazard is possible by construction.
+  - 
 - **Single-active-engine arbitration** at the top level: `AES_Encrypt` and `AES_Decrypt` are two independent pipeline instances sharing one data bus. Rather than building a reorder buffer to merge two independent `out_valid` streams, the design enforces a provably-safe policy — a new transaction of one mode is only accepted while the *other* engine's pipeline is fully drained — which guarantees `enc_out_valid` and `dec_out_valid` are mutually exclusive every cycle, so the output mux is a plain OR/mux with a runtime assertion backing the invariant.
+- 
 - **Plain valid/ready streaming interface**, deliberately shaped to drop behind AXI4-Stream (data plane) and AXI4-Lite (control/status plane) shells without restructuring — documented inline in `aes_top.sv`.
+- 
 - **Bottom-up, golden-model verification** at every hierarchy level: unit tests for each transform primitive, a scoreboarded subsystem testbench for the key system, directed regression testbenches (10 test groups, thousands of vectors) for encrypt/decrypt, and a class-based (generator/driver/scoreboard) testbench at the top level.
 - Fully synthesizable SystemVerilog, verified functionally correct on **Vivado XSIM**, targeting a **PYNQ-Z2 / Zynq-7000** class FPGA (see [Future work](#future-work)).
 
 ## System architecture
 
-![System architecture diagram](docs/images/system_architecture.jpg)
+![System architecture diagram](images/system_architecture.jpg)
 
 ### Top level — `aes_top`
 
@@ -73,6 +77,8 @@ The project also treats verification as a first-class deliverable, not an aftert
 Key material (`round_keys`, raw `wkey`) is **never exposed on the top-level ports** — only status bits are — matching standard accelerator practice of keeping key material off observable pins. A verification testbench that needs to check key correctness reaches in via a hierarchical reference (`dut.round_keys`), exactly as `tb_aes_top.sv` does.
 
 ### The dual-bank key expansion unit
+
+![Dual Bank Key Unit](images/key_system_architecture.jpg)
 
 This is the design's core idea, so it's worth walking through explicitly.
 
@@ -94,6 +100,7 @@ This is the design's core idea, so it's worth walking through explicitly.
 
 ### The 11-stage pipelined cipher datapath
 
+![AES_core_engine](images/engine_architecture.jpg)
 `AES_Encrypt` and `AES_Decrypt` are structural mirrors of each other, `PIPE_DEPTH = NUM_ROUNDS + 1 = 11` stages deep:
 
 **Encrypt** (`AES_Encrypt.sv`):
@@ -219,24 +226,173 @@ The `tb_encrypt_test.sv` header documents a real debugging episode worth highlig
 - **Race 2**: a zero-cycle gap between consecutive stimulus tasks during active backpressure could cause the driver's `@(posedge clk)` wait and the acceptance monitor's sampling to align on the same edge in an order-dependent way.
 
 **Fix applied**: strict **negedge-drive / posedge-sample** discipline across the entire testbench suite — all stimulus (`in_valid`, `out_ready`, data) changes only at `negedge clk`, and all sampling/monitoring only happens at `posedge clk`, after values have been stable for a full half-cycle. This eliminated all 577 spurious failures without touching the DUT. This fix is now standard practice across every testbench in the repository.
+# Verification Results
 
-### Waveform evidence
+The AES accelerator was verified using a hierarchical bottom-up verification strategy consisting of unit-level, subsystem-level, and top-level self-checking testbenches. All testbenches compare DUT outputs against an independent software reference model derived directly from FIPS-197 rather than RTL-derived expected values.
 
-Representative Vivado XSIM waveform captures backing the summarized results above:
+---
 
-**Full encrypt regression, final results banner** — Tests 7–10 passing plus the aggregate summary (6,281/6,281 checked, 0 fail):
+## Key Expansion Subsystem Verification
 
-![Encrypt regression final results](docs/images/wave_encrypt_final_results.png)
+The dual-bank key management subsystem was verified independently before integration with the encryption and decryption datapaths.
 
-**Test 8 — bank-valid stress**, `key_system.sv` variant showing `bank_valid`/`bank_busy` transitions and `in_ready` correctly gating across all four bank-valid combinations:
+### Verification Objectives
 
-![Bank-valid stress waveform](docs/images/wave_test8_bank_stress.png)
+- Correct AES-128 key schedule generation
+- Dual-bank allocation and release logic
+- FIFO buffering functionality
+- Bank arbitration correctness
+- Backpressure handling
+- Continuous key-stream operation
 
-**Key system random regression (Test 4)** — `key_in`, `round_keys`, `bank_valid`/`bank_free` transitions and `ref_key_out` scoreboard comparison across dozens of randomized keys, `pass_count` incrementing in lock-step with no `fail_count`:
+### Key System Waveform
 
-![Key system regression waveform](docs/images/wave_key_system_random_regression.png)
+![Key System Verification](docs/images/key_system_waveform.png)
 
-> A Vivado `xelab`/`VRFC` stale-compile error (`needs to be re-saved`) encountered mid-development after editing `aes_ref_pkg` is also included in the repo history as a reminder of a real toolchain gotcha — after modifying a package consumed by a precompiled testbench snapshot, `tb_encrypt`/`tb_decrypt` must be relaunched (not just re-elaborated) or XSIM will fail to restore the design unit.
+The waveform above demonstrates:
+
+- FIFO key acceptance
+- Key expansion initiation
+- Dual-bank allocation
+- Round-key generation
+- Bank busy/free transitions
+- Key availability signaling
+- Continuous operation under randomized workloads
+
+### Key System Verification Results
+
+| Test Category | Result |
+|--------------|--------|
+| FIPS-197 KAT | PASS |
+| Bank Rotation | PASS |
+| Bank Reuse | PASS |
+| Randomized Regression | PASS |
+| FIFO Backpressure | PASS |
+| Bank Stress Testing | PASS |
+
+**Summary:** 49 / 49 tests passed.
+
+---
+
+## AES Encryption Pipeline Verification
+
+The 11-stage fully-pipelined AES encryption engine was verified using both directed FIPS-197 known-answer tests and randomized regression vectors.
+
+### Verification Objectives
+
+- Correct AES-128 encryption
+- Pipeline latency validation
+- Continuous streaming operation
+- Back-to-back transaction support
+- Output backpressure handling
+- Bank-aware round-key selection
+
+### Encryption Datapath Waveform
+
+![Encryption Pipeline Verification](docs/images/encryption_waveform.png)
+
+The waveform illustrates:
+
+- Continuous valid/ready streaming
+- Pipeline fill behavior
+- Ciphertext generation
+- Transaction ID tracking
+- Round-key selection
+- Bank switching during operation
+- Correct handling of output stalls
+
+### Encryption Verification Results
+
+| Test Category | Result |
+|--------------|--------|
+| FIPS-197 KAT | PASS |
+| Pipeline Fill/Drain | PASS |
+| Random Regression | PASS |
+| Bank Alternation | PASS |
+| Back-to-Back Bursts | PASS |
+| Output Backpressure | PASS |
+| Long Regression | PASS |
+
+**Summary:** 6281 vectors checked, 0 failures.
+
+---
+
+## AES Decryption Pipeline Verification
+
+The inverse cipher datapath was verified independently using the same methodology as the encryption engine.
+
+### Verification Objectives
+
+- Correct AES-128 decryption
+- Reverse round-key traversal
+- Inverse transformation correctness
+- Continuous streaming operation
+- Backpressure recovery
+- Bank-aware key retrieval
+
+### Decryption Datapath Waveform
+
+![Decryption Pipeline Verification](docs/images/decryption_waveform.png)
+
+The waveform demonstrates:
+
+- Streaming plaintext recovery
+- Correct inverse round execution
+- Shared key memory operation
+- Valid/ready handshaking
+- Continuous transaction acceptance
+- Proper output generation under load
+
+### Decryption Verification Results
+
+| Test Category | Result |
+|--------------|--------|
+| FIPS-197 KAT | PASS |
+| Random Regression | PASS |
+| Continuous Streaming | PASS |
+| Bank Switching | PASS |
+| Output Stalls | PASS |
+| Long Regression | PASS |
+
+**Summary:** All directed and randomized tests passed.
+
+---
+
+## Top-Level System Verification
+
+After individual subsystem validation, the complete accelerator was verified using a layered class-based self-checking testbench.
+
+![Verification Methodology](docs/images/verification_methodology.png)
+
+The verification environment includes:
+
+- Transaction Generator
+- Driver
+- Monitor
+- Scoreboard
+- Golden Reference Model
+- Functional Coverage Collection
+
+Coverage dimensions include:
+
+- Encryption and decryption modes
+- Dual-bank operation
+- In-flight direction switching
+- Continuous streaming traffic
+- Back-to-back transfers
+- Backpressure scenarios
+- Long randomized regressions
+
+### Final Verification Results
+
+| Metric | Value |
+|---------|---------|
+| Transactions Accepted | 6281 |
+| Transactions Checked | 6281 |
+| Pass Count | 6281 |
+| Failure Count | 0 |
+
+✅ All tests passed successfully.
 
 ### Results summary
 
