@@ -174,7 +174,7 @@ The suite is bottom-up: primitive transforms are exhaustively or vector-checked 
 
 ### Verification architecture
 
-![Verification methodology diagram](docs/images/verification_methodology.jpg)
+![Verification methodology diagram](images/verification_methodology.jpg)
 
 ### Per-module verification plan
 
