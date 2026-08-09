@@ -174,8 +174,6 @@ Beyond the datapath itself, verification was treated as a primary design objecti
 
 ## System Architecture
 
-![System architecture diagram](images/system_architecture.jpg)
-
 ### Top level — `aes_top`
 
 `aes_top` composes three sub-blocks behind one narrow port list:
@@ -189,8 +187,6 @@ Beyond the datapath itself, verification was treated as a primary design objecti
 Key material (`round_keys`, raw `wkey`) is **never exposed on the top-level ports** — only status bits are — matching standard accelerator practice of keeping key material off observable pins. A verification testbench that needs to check key correctness reaches in via a hierarchical reference (`dut.round_keys`), exactly as `tb_aes_top.sv` does.
 
 ### The dual-bank key expansion unit
-
-![Dual Bank Key Unit](images/key_system_architecture.jpg)
 
 This is the design's core idea, so it's worth walking through explicitly.
 
@@ -212,7 +208,6 @@ This is the design's core idea, so it's worth walking through explicitly.
 
 ### The 11-stage pipelined cipher datapath
 
-![AES_core_engine](images/engine_architecture.jpg)
 `AES_Encrypt` and `AES_Decrypt` are structural mirrors of each other, `PIPE_DEPTH = NUM_ROUNDS + 1 = 11` stages deep:
 
 **Encrypt** (`AES_Encrypt.sv`):
